@@ -2,13 +2,13 @@ import os
 from collections.abc import Iterator
 
 import pytest
+from alembic import command
+from alembic.config import Config as AlembicConfig
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-from alembic import command
-from alembic.config import Config as AlembicConfig
 from app.core.config import settings
 from app.db import Base, get_db
 from app.main import app

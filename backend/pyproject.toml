@@ -39,6 +39,11 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.isort]
+# The local alembic/ scripts directory shadows the installed package name;
+# pin it so every ruff version sorts these imports the same way.
+known-third-party = ["alembic"]
+
 [tool.ruff.format]
 quote-style = "double"
 
