@@ -18,17 +18,24 @@ drives what the agent says and pushes.
 
 ## Status
 
-Phase 1 walking skeleton. What exists today:
+Phase 2: database and core API. What exists today:
 
-- FastAPI backend serving `GET /health`
+- Postgres data model (goals, plans, tasks, check-ins, progress ledger, retros,
+  push subscriptions, job runs, settings) with Alembic migrations
+- Bearer token auth on every endpoint except `/health`
+- Goals CRUD returning a nested tree with computed current, percent, and pace
+- A single progress service owning all progress and pace math: metric goals get
+  honest progress bars, vague goals never get a fake percent, and pace status
+  (ahead, on track, behind) is computed against how much of the period has elapsed
+- Auto-logged progress: evening application counts and completed linked tasks
+  move the bars without bookkeeping
+- `/today`, `/progress/summary`, and settings endpoints for the PWA to come
 - React + Vite + Tailwind frontend rendering a placeholder shell
-- Local Postgres 16 via Docker Compose
-- CI (ruff, mypy, pytest, oxlint, prettier, vitest, build) on every pull request
-- ADRs 0001 through 0005 fixing the architecture
+- CI runs the backend suite against a real Postgres service
 
-Coming next, in order: database and core API, the agent brain (Claude planning,
-reflection, retro, speech to text), push and scheduling, Google Calendar integration,
-the installable PWA, and deployment.
+Coming next, in order: the agent brain (Claude planning, reflection, retro, speech
+to text), push and scheduling, Google Calendar integration, the installable PWA,
+and deployment.
 
 ## Architecture
 
@@ -57,10 +64,11 @@ Backend (Python 3.12):
 docker compose up -d db                      # Postgres 16 on localhost:5432
 
 cd backend
-uv venv --python 3.12 && uv pip install -e ".[dev]"
-cp .env.example .env
+uv sync --extra dev
+cp .env.example .env                         # set APP_TOKEN, keep the local DATABASE_URL
+uv run alembic upgrade head                  # create the schema
 uv run uvicorn app.main:app --reload         # http://localhost:8000/health
-uv run pytest
+uv run pytest                                # uses its own aimentum_test database
 ```
 
 Frontend:
@@ -70,6 +78,44 @@ cd frontend
 npm install
 npm run dev                                  # http://localhost:5173
 npm run test
+```
+
+## API
+
+Every endpoint except `/health` requires the bearer token from `backend/.env`.
+A quick tour with curl:
+
+```bash
+API=http://localhost:8000
+AUTH="Authorization: Bearer change-me"        # your APP_TOKEN
+JSON="Content-Type: application/json"
+
+# Create the big goal, then a metric monthly goal under it. The monthly goal
+# defaults its period to the current calendar month and auto-logs progress
+# from evening application counts.
+curl -s -X POST "$API/goals" -H "$AUTH" -H "$JSON" \
+  -d '{"level": "big", "title": "Land a junior dev role"}'
+curl -s -X POST "$API/goals" -H "$AUTH" -H "$JSON" \
+  -d '{"level": "monthly", "parent_id": 1, "title": "40 quality applications",
+       "target_value": 40, "unit": "applications", "auto_source": "applications"}'
+
+# Log manual progress; the response carries the updated total.
+curl -s -X POST "$API/goals/1/progress" -H "$AUTH" -H "$JSON" \
+  -d '{"delta": 1, "note": "networking coffee"}'
+
+# The goal tree: big goals with monthly children, each with current, percent,
+# and pace (ahead, on_track, behind).
+curl -s "$API/goals" -H "$AUTH"
+
+# The Today card payload: applications floor plus each metric goal's bar.
+curl -s "$API/progress/summary" -H "$AUTH"
+
+# Today's plan, tasks, and check-in state; empty on a fresh day.
+curl -s "$API/today" -H "$AUTH"
+
+# Settings, including the daily applications floor.
+curl -s "$API/settings" -H "$AUTH"
+curl -s -X PATCH "$API/settings" -H "$AUTH" -H "$JSON" -d '{"applications_floor": 6}'
 ```
 
 ## Development workflow
