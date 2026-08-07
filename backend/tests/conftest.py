@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.db import Base, get_db, get_session_factory
 from app.main import app
+from app.services.calendar import FakeCalendarService, get_calendar
 from app.services.llm import get_llm
 from app.services.push import FakePushTransport, get_push_transport
 from app.services.stt import FakeSpeechToText, get_stt
@@ -99,7 +100,14 @@ def db_session(engine: Engine) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(db_session: Session) -> Iterator[TestClient]:
+def fake_calendar() -> FakeCalendarService:
+    """Shared with the client fixture, so a test can seed events or take the
+    calendar offline and the app sees the same instance."""
+    return FakeCalendarService()
+
+
+@pytest.fixture
+def client(db_session: Session, fake_calendar: FakeCalendarService) -> Iterator[TestClient]:
     def override() -> Iterator[Session]:
         yield db_session
 
@@ -111,6 +119,8 @@ def client(db_session: Session) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db] = override
     app.dependency_overrides[get_session_factory] = lambda: override_factory
+    # Always faked: no test should ever reach for real Google credentials.
+    app.dependency_overrides[get_calendar] = lambda: fake_calendar
     with TestClient(app) as test_client:
         test_client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
         yield test_client
