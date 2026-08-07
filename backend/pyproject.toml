@@ -16,6 +16,7 @@ dependencies = [
   "anthropic>=0.40",
   "google-cloud-speech>=2.26",
   "python-multipart>=0.0.9",
+  "pywebpush>=2.0",
 ]
 
 [project.optional-dependencies]

@@ -8,7 +8,6 @@ generated copy must follow the same prose rules as the rest of the product.
 
 import json
 from datetime import date, timedelta
-from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,6 +24,7 @@ from app.models import (
 )
 from app.services import progress as progress_service
 from app.services.llm import LlmClient, load_prompt
+from app.services.progress import format_number
 
 REFLECTION_MAX_CHARS = 400
 RETRO_MAX_CHARS = 1200
@@ -37,14 +37,6 @@ def sanitize_copy(text: str, max_chars: int) -> str:
     if len(cleaned) > max_chars:
         cleaned = cleaned[:max_chars].rstrip()
     return cleaned
-
-
-def _format_number(value: Decimal | float) -> str:
-    """Render 3.00 as 3 and 3.50 as 3.5 so prompt numbers read naturally."""
-    decimal_value = Decimal(str(value))
-    if decimal_value == decimal_value.to_integral_value():
-        return str(int(decimal_value))
-    return str(decimal_value.normalize())
 
 
 def _goal_context_lines(session: Session, today: date) -> tuple[str, set[int]]:
@@ -65,8 +57,8 @@ def _goal_context_lines(session: Session, today: date) -> tuple[str, set[int]]:
         if goal.target_value is not None and pace is not None:
             lines.append(
                 f"- goal id {goal.id}: {goal.title}:"
-                f" {_format_number(current)} of {_format_number(goal.target_value)}"
-                f" {goal.unit or 'units'}, expected {_format_number(pace.expected)} by today,"
+                f" {format_number(current)} of {format_number(goal.target_value)}"
+                f" {goal.unit or 'units'}, expected {format_number(pace.expected)} by today,"
                 f" status {pace.status.replace('_', ' ')}"
             )
         else:

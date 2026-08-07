@@ -90,6 +90,28 @@ def compute_pace(
     return Pace(expected=round(expected, 2), status=status)
 
 
+def format_number(value: Decimal | float) -> str:
+    """Render 3.00 as 3 and 3.50 as 3.5 so numbers read naturally in copy."""
+    decimal_value = Decimal(str(value))
+    if decimal_value == decimal_value.to_integral_value():
+        return str(int(decimal_value))
+    return str(decimal_value.normalize())
+
+
+def pace_phrase(current: float, expected: float, status: PaceStatus) -> str:
+    """Phrase a pace status for push copy, for example '3 behind pace'.
+
+    The gap is the distance between where the goal is and where it should
+    be by now; both numbers come from compute_pace, so this only phrases
+    them.
+    """
+    if status == "on_track":
+        return "on track"
+    gap = abs(round(expected - current, 1))
+    direction = "behind" if status == "behind" else "ahead of"
+    return f"{format_number(gap)} {direction} pace"
+
+
 def goal_current(session: Session, goal_id: int) -> Decimal:
     total = session.execute(
         select(func.coalesce(func.sum(ProgressLog.delta), 0)).where(ProgressLog.goal_id == goal_id)

@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     app_token: str = ""
     database_url: str = "postgresql+psycopg://aimentum:aimentum@localhost:5432/aimentum"
 
+    tick_secret: str = ""
+
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:aidinthr82@gmail.com"
+
     anthropic_api_key: str = ""
     anthropic_model_daily: str = "claude-haiku-4-5-20251001"
     anthropic_model_retro: str = "claude-sonnet-4-6"
