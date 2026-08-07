@@ -18,7 +18,24 @@ drives what the agent says and pushes.
 
 ## Status
 
-Phase 2: database and core API. What exists today:
+Phase 3: the agent brain. What exists today:
+
+- Morning planning: free text (or a voice transcript) goes in, Claude parses
+  it into ordered tasks with goal links and a one-line priority rationale,
+  weighing each metric goal's live pace numbers and the applications floor
+- Voice check-ins: audio uploads are transcoded to FLAC with ffmpeg and
+  transcribed server-side via Google Speech-to-Text behind a swappable
+  Protocol; the transcript comes back for a human confirm before it becomes
+  the plan
+- Evening check-in: task states and the applications count are recorded (auto
+  feeding the goal ledger), and Claude writes a short reflection citing the
+  real numbers, hard-capped at 400 characters in code
+- Weekly retro generation with a 1200 character cap, plus retro endpoints
+- Prompts live as versioned files in backend/app/prompts, never inline
+- The agent test suite runs with a mocked Anthropic client and a fake
+  transcriber: zero real API calls
+
+From Phase 2:
 
 - Postgres data model (goals, plans, tasks, check-ins, progress ledger, retros,
   push subscriptions, job runs, settings) with Alembic migrations
@@ -33,9 +50,8 @@ Phase 2: database and core API. What exists today:
 - React + Vite + Tailwind frontend rendering a placeholder shell
 - CI runs the backend suite against a real Postgres service
 
-Coming next, in order: the agent brain (Claude planning, reflection, retro, speech
-to text), push and scheduling, Google Calendar integration, the installable PWA,
-and deployment.
+Coming next, in order: push and scheduling, Google Calendar integration, the
+installable PWA, and deployment.
 
 ## Architecture
 
@@ -116,6 +132,20 @@ curl -s "$API/today" -H "$AUTH"
 # Settings, including the daily applications floor.
 curl -s "$API/settings" -H "$AUTH"
 curl -s -X PATCH "$API/settings" -H "$AUTH" -H "$JSON" -d '{"applications_floor": 6}'
+
+# Morning check-in: Claude parses and prioritizes the day (needs ANTHROPIC_API_KEY).
+curl -s -X POST "$API/checkin/morning" -H "$AUTH" -H "$JSON" \
+  -d '{"raw_text": "send 5 applications, gym, call the landlord", "input_mode": "text"}'
+
+# Voice path: upload a recording, get the transcript back for confirm-or-edit.
+curl -s -X POST "$API/checkin/morning/audio" -H "$AUTH" -F "file=@clip.m4a"
+
+# Evening check-in: check off tasks, log the applications count, get the reflection.
+curl -s -X POST "$API/checkin/evening" -H "$AUTH" -H "$JSON" \
+  -d '{"applications_sent": 6, "note": "good day", "task_states": [{"id": 1, "done": true}]}'
+
+# Weekly retros.
+curl -s "$API/retros/latest" -H "$AUTH"
 ```
 
 ## Development workflow
