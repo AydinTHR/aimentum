@@ -119,17 +119,18 @@ docs/adr/   architecture decision records
 
 ## Local development
 
+The database is hosted, so running the app needs no Docker and no local
+Postgres. Point `DATABASE_URL` at a [Neon](https://neon.com) project (free
+tier) and the backend talks straight to it.
+
 Backend (Python 3.12):
 
 ```bash
-docker compose up -d db                      # Postgres 16 on localhost:5432
-
 cd backend
 uv sync --extra dev
-cp .env.example .env                         # set APP_TOKEN, keep the local DATABASE_URL
+cp .env.example .env                         # set APP_TOKEN and DATABASE_URL
 uv run alembic upgrade head                  # create the schema
 uv run uvicorn app.main:app --reload         # http://localhost:8000/health
-uv run pytest                                # uses its own aimentum_test database
 ```
 
 Frontend:
@@ -139,6 +140,25 @@ cd frontend
 npm install
 npm run dev                                  # http://localhost:5173
 npm run test
+```
+
+### Running the tests
+
+The suite drops and rebuilds its schema on every run, so it uses its own
+database and refuses to touch a non-local host. That guard is deliberate:
+with a hosted development database, a stray `TEST_DATABASE_URL` would be the
+difference between a test run and losing real data.
+
+```bash
+docker compose up -d db                      # Postgres 16, only needed for tests
+cd backend && uv run pytest
+```
+
+To run tests without Docker at all, create a throwaway Neon branch and opt in
+explicitly, understanding that its schema gets dropped on every run:
+
+```bash
+TEST_DATABASE_URL=<throwaway branch url> ALLOW_REMOTE_TEST_DB=1 uv run pytest
 ```
 
 ## API
