@@ -184,13 +184,24 @@ class JobRun(Base):
 
 
 class PushLog(Base):
+    """Audit trail for every push send attempt.
+
+    subscription_id is nullable and survives pruning: when a dead
+    subscription is deleted the FK is set to null rather than cascading the
+    log rows away. Web push has no delivery receipts, so this history is the
+    only evidence a send was attempted, and losing it the moment an endpoint
+    expires would defeat the point. `endpoint` keeps the target readable
+    after the subscription row is gone.
+    """
+
     __tablename__ = "push_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     job: Mapped[str] = mapped_column(String(50))
-    subscription_id: Mapped[int] = mapped_column(
-        ForeignKey("push_subscriptions.id", ondelete="CASCADE"), index=True
+    subscription_id: Mapped[int | None] = mapped_column(
+        ForeignKey("push_subscriptions.id", ondelete="SET NULL"), index=True
     )
+    endpoint: Mapped[str] = mapped_column(Text, server_default="")
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(200))
 
