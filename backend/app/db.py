@@ -1,4 +1,5 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from functools import lru_cache
 from typing import Annotated
 
@@ -37,3 +38,24 @@ def get_db() -> Iterator[Session]:
 
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+SessionFactory = Callable[[], AbstractContextManager[Session]]
+
+
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    with get_sessionmaker()() as session:
+        yield session
+
+
+def get_session_factory() -> SessionFactory:
+    """A way to open a session outside the request cycle.
+
+    Background tasks run after the response is sent, by which point the
+    request-scoped session is closed. They take this factory instead, which
+    tests override so background work lands in the test transaction.
+    """
+    return session_scope
+
+
+SessionFactoryDep = Annotated[SessionFactory, Depends(get_session_factory)]
