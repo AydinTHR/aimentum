@@ -138,3 +138,43 @@ class SettingsPatch(BaseModel):
     time_blocking_enabled: bool | None = None
     workday_start: time | None = None
     workday_end: time | None = None
+
+
+class MorningCheckinIn(BaseModel):
+    raw_text: str = Field(min_length=1, max_length=5000)
+    input_mode: InputMode = InputMode.TEXT
+
+
+class MorningPlanOut(BaseModel):
+    plan: PlanOut
+    tasks: list[TaskOut]
+
+
+class TranscriptOut(BaseModel):
+    transcript: str
+
+
+class TaskStateIn(BaseModel):
+    id: int
+    done: bool
+
+
+class EveningCheckinIn(BaseModel):
+    applications_sent: int = Field(ge=0)
+    note: str | None = Field(default=None, max_length=2000)
+    task_states: list[TaskStateIn] = []
+
+
+class EveningCheckinOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    checkin: CheckinOut
+    summary: dict[str, object]
+
+
+class RetroOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    week_start: date
+    body: str

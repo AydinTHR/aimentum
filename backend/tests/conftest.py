@@ -12,6 +12,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.db import Base, get_db
 from app.main import app
+from app.services.llm import get_llm
+from app.services.stt import FakeSpeechToText, get_stt
+from tests.agent_fakes import FakeLlm
 
 TEST_TOKEN = "test-token"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,3 +82,19 @@ def client(db_session: Session) -> Iterator[TestClient]:
         test_client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def fake_llm() -> Iterator[FakeLlm]:
+    fake = FakeLlm()
+    app.dependency_overrides[get_llm] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.fixture
+def fake_stt() -> Iterator[FakeSpeechToText]:
+    fake = FakeSpeechToText()
+    app.dependency_overrides[get_stt] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_stt, None)
