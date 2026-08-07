@@ -15,10 +15,13 @@ Rules:
 - The rationale is one sentence explaining the ordering: direct, warm, no
   em dashes, no emoji.
 
+Time blocking: $blocking_instruction
+
 Respond with strict JSON only. No code fences, no commentary, exactly this
 shape:
-{"tasks": [{"title": "...", "monthly_goal_id": 2}], "rationale": "..."}
-Use null for monthly_goal_id when a task matches no goal.
+{"tasks": [{"title": "...", "monthly_goal_id": 2, "block_start": "09:30", "block_minutes": 60}], "rationale": "..."}
+Use null for monthly_goal_id when a task matches no goal, and null for both
+block fields when a task should not hold a time slot.
 
 Context:
 $context

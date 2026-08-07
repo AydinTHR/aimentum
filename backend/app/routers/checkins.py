@@ -19,6 +19,7 @@ from app.services.audio import (
     FfmpegMissingError,
     transcode_to_flac,
 )
+from app.services.calendar import CalendarDep
 from app.services.llm import LlmDep
 from app.services.progress import progress_summary
 from app.services.stt import SttDep
@@ -27,8 +28,17 @@ router = APIRouter(tags=["checkins"])
 
 
 @router.post("/checkin/morning")
-def morning_checkin(payload: MorningCheckinIn, session: DbSession, llm: LlmDep) -> MorningPlanOut:
-    plan = agent.plan_morning(session, llm, payload.raw_text, payload.input_mode, user_today())
+def morning_checkin(
+    payload: MorningCheckinIn, session: DbSession, llm: LlmDep, calendar: CalendarDep
+) -> MorningPlanOut:
+    plan = agent.plan_morning(
+        session,
+        llm,
+        payload.raw_text,
+        payload.input_mode,
+        user_today(),
+        calendar=calendar,
+    )
     session.commit()
     return MorningPlanOut(
         plan=PlanOut.model_validate(plan),

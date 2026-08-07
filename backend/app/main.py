@@ -4,6 +4,7 @@ from app.core.auth import BearerAuthMiddleware
 from app.core.config import settings
 from app.routers import (
     app_settings,
+    calendar,
     checkins,
     goals,
     health,
@@ -27,3 +28,4 @@ app.include_router(checkins.router)
 app.include_router(retros.router)
 app.include_router(push.router)
 app.include_router(tick.router)
+app.include_router(calendar.router)

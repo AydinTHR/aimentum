@@ -1,8 +1,9 @@
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.timeutil import USER_TIMEZONE
 from app.models import AutoSource, GoalLevel, GoalStatus, InputMode
 from app.services.progress import PaceStatus
 
@@ -89,6 +90,18 @@ class TaskOut(BaseModel):
     sort: int
     block_start: datetime | None
     block_minutes: int | None
+    gcal_event_id: str | None
+
+    @field_validator("block_start")
+    @classmethod
+    def _in_user_timezone(cls, value: datetime | None) -> datetime | None:
+        """Present the block in the owner's timezone, not the database's.
+
+        Postgres hands tz-aware columns back in UTC. That is the same instant,
+        but a 20:30 block would serialize with tomorrow's date, which is wrong
+        for a payload the Today screen renders directly.
+        """
+        return None if value is None else value.astimezone(USER_TIMEZONE)
 
 
 class TaskPatch(BaseModel):
@@ -214,3 +227,17 @@ class TickOut(BaseModel):
     job: str
     date: date
     status: str
+
+
+class CalendarEventOut(BaseModel):
+    summary: str
+    start: datetime
+    end: datetime
+    all_day: bool
+    calendar: str
+
+
+class CalendarDayOut(BaseModel):
+    date: date
+    available: bool
+    events: list[CalendarEventOut]

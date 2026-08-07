@@ -7,12 +7,15 @@ generated copy must follow the same prose rules as the rest of the product.
 """
 
 import json
-from datetime import date, timedelta
+import logging
+from dataclasses import dataclass
+from datetime import date, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AppSettings,
     Checkin,
     DailyPlan,
     Goal,
@@ -23,8 +26,12 @@ from app.models import (
     Task,
 )
 from app.services import progress as progress_service
+from app.services.calendar import CalendarEvent, CalendarService, CalendarUnavailable
 from app.services.llm import LlmClient, load_prompt
 from app.services.progress import format_number
+from app.services.scheduling import BlockProposal, schedule_blocks
+
+logger = logging.getLogger(__name__)
 
 REFLECTION_MAX_CHARS = 400
 RETRO_MAX_CHARS = 1200
@@ -68,9 +75,14 @@ def _goal_context_lines(session: Session, today: date) -> tuple[str, set[int]]:
     return "\n".join(lines), valid_ids
 
 
-def _parse_morning_json(
-    text: str, valid_goal_ids: set[int]
-) -> tuple[list[tuple[str, int | None]], str] | None:
+@dataclass(frozen=True)
+class ParsedTask:
+    title: str
+    monthly_goal_id: int | None
+    proposal: BlockProposal | None = None
+
+
+def _parse_morning_json(text: str, valid_goal_ids: set[int]) -> tuple[list[ParsedTask], str] | None:
     """Parse Claude's strict JSON defensively; None means fall back."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -88,8 +100,8 @@ def _parse_morning_json(
     if not isinstance(raw_tasks, list) or not raw_tasks:
         return None
 
-    tasks: list[tuple[str, int | None]] = []
-    for entry in raw_tasks[:MAX_TASKS_PER_PLAN]:
+    tasks: list[ParsedTask] = []
+    for index, entry in enumerate(raw_tasks[:MAX_TASKS_PER_PLAN]):
         if not isinstance(entry, dict):
             return None
         title = entry.get("title")
@@ -98,11 +110,72 @@ def _parse_morning_json(
         goal_id = entry.get("monthly_goal_id")
         if not isinstance(goal_id, int) or goal_id not in valid_goal_ids:
             goal_id = None
-        tasks.append((title.strip()[:300], goal_id))
+        tasks.append(
+            ParsedTask(
+                title=title.strip()[:300],
+                monthly_goal_id=goal_id,
+                proposal=_parse_block_proposal(entry, index),
+            )
+        )
 
     rationale = payload.get("rationale")
     rationale_text = rationale.strip() if isinstance(rationale, str) else ""
     return tasks, sanitize_copy(rationale_text, 300)
+
+
+def _parse_block_proposal(entry: dict[str, object], index: int) -> BlockProposal | None:
+    """Read the optional block fields; anything malformed just means no block."""
+    raw_start = entry.get("block_start")
+    raw_minutes = entry.get("block_minutes")
+    if not isinstance(raw_start, str) or not isinstance(raw_minutes, int) or raw_minutes <= 0:
+        return None
+    try:
+        start = time.fromisoformat(raw_start)
+    except ValueError:
+        return None
+    return BlockProposal(task_index=index, start=start, minutes=raw_minutes)
+
+
+def _event_lines(events: list[CalendarEvent], available: bool) -> str:
+    if not available:
+        return "unavailable, so plan without knowing today's meetings"
+    if not events:
+        return "nothing scheduled"
+    lines = []
+    for event in events:
+        when = (
+            "all day"
+            if event.all_day
+            else (f"{event.start.strftime('%H:%M')} to {event.end.strftime('%H:%M')}")
+        )
+        lines.append(f"- {when}: {event.summary}")
+    return "\n" + "\n".join(lines)
+
+
+def _read_calendar(
+    calendar: CalendarService | None, today: date
+) -> tuple[list[CalendarEvent], bool]:
+    """Today's events, plus whether the calendar answered at all."""
+    if calendar is None:
+        return [], False
+    try:
+        return calendar.list_events(today), True
+    except CalendarUnavailable as error:
+        logger.warning("calendar unavailable for %s: %s", today, error)
+        return [], False
+
+
+def _clear_blocks(calendar: CalendarService | None, plan: DailyPlan) -> None:
+    """Remove the calendar events a superseded plan created."""
+    if calendar is None:
+        return
+    for task in plan.tasks:
+        if not task.gcal_event_id:
+            continue
+        try:
+            calendar.delete_block(task.gcal_event_id)
+        except CalendarUnavailable as error:
+            logger.warning("could not delete block %s: %s", task.gcal_event_id, error)
 
 
 def plan_morning(
@@ -111,16 +184,25 @@ def plan_morning(
     raw_text: str,
     input_mode: InputMode,
     today: date,
+    calendar: CalendarService | None = None,
 ) -> DailyPlan:
     """Parse and prioritize the morning check-in into today's plan.
 
-    Re-submitting replaces today's plan: the previous plan and its tasks are
-    deleted so a re-plan starts clean. Parsing never asks questions; if the
-    JSON cannot be salvaged, the fallback is one task holding the raw text.
+    Re-submitting replaces today's plan: the previous plan, its tasks, and
+    the calendar blocks it created are removed so a re-plan starts clean.
+    Parsing never asks questions; if the JSON cannot be salvaged, the
+    fallback is one task holding the raw text.
+
+    The calendar is optional on purpose. If it cannot be reached the plan is
+    still made, without meetings and without time blocks, and the rationale
+    says so rather than quietly pretending the day is empty.
     """
     goal_lines, valid_ids = _goal_context_lines(session, today)
     settings_row = progress_service.get_settings_row(session)
     checkin = session.scalars(select(Checkin).where(Checkin.date == today)).first()
+    events, calendar_available = _read_calendar(calendar, today)
+    blocking_on = settings_row.time_blocking_enabled and calendar_available
+
     applications_line = (
         f"applications floor: {settings_row.applications_floor} per day;"
         f" logged today so far: {checkin.applications_sent if checkin else 0}"
@@ -128,21 +210,40 @@ def plan_morning(
     context = (
         f"Today is {today.isoformat()}.\n"
         f"{applications_line}\n"
-        "Today's calendar events: none available yet.\n"
+        f"Today's calendar events: {_event_lines(events, calendar_available)}\n"
+        f"Workday window: {settings_row.workday_start.strftime('%H:%M')}"
+        f" to {settings_row.workday_end.strftime('%H:%M')}\n"
         f"Active monthly goals:\n{goal_lines}"
     )
+    blocking_instruction = (
+        "propose block_start (HH:MM, 24 hour) and block_minutes for each task "
+        "that deserves a slot, inside the workday window and clear of the "
+        "events above. Leave both null for anything that does not need one."
+        if blocking_on
+        else "disabled today. Set block_start and block_minutes to null on every task."
+    )
 
-    prompt = load_prompt("morning_prioritize_v1.txt").substitute(context=context, raw_text=raw_text)
+    prompt = load_prompt("morning_prioritize_v1.txt").substitute(
+        context=context, raw_text=raw_text, blocking_instruction=blocking_instruction
+    )
     parsed = _parse_morning_json(llm.complete_daily(prompt), valid_ids)
-    tasks: list[tuple[str, int | None]]
+    tasks: list[ParsedTask]
     if parsed is None:
-        tasks = [(raw_text.strip()[:300] or "Plan the day", None)]
+        tasks = [ParsedTask(title=raw_text.strip()[:300] or "Plan the day", monthly_goal_id=None)]
         rationale = "Saved as one task because the plan could not be parsed."
     else:
         tasks, rationale = parsed
 
+    if not calendar_available and calendar is not None:
+        rationale = sanitize_copy(
+            f"{rationale} Calendar was unreachable, so this plan does not account "
+            "for meetings.".strip(),
+            300,
+        )
+
     existing = session.scalars(select(DailyPlan).where(DailyPlan.date == today)).first()
     if existing is not None:
+        _clear_blocks(calendar, existing)
         session.delete(existing)
         session.flush()
 
@@ -151,10 +252,47 @@ def plan_morning(
     )
     session.add(plan)
     session.flush()
-    for sort, (title, goal_id) in enumerate(tasks):
-        session.add(Task(plan_id=plan.id, title=title, monthly_goal_id=goal_id, sort=sort))
+
+    rows: list[Task] = []
+    for sort, parsed_task in enumerate(tasks):
+        row = Task(
+            plan_id=plan.id,
+            title=parsed_task.title,
+            monthly_goal_id=parsed_task.monthly_goal_id,
+            sort=sort,
+        )
+        session.add(row)
+        rows.append(row)
     session.flush()
+
+    if blocking_on and calendar is not None:
+        _write_blocks(calendar, rows, tasks, events, today, settings_row)
+        session.flush()
     return plan
+
+
+def _write_blocks(
+    calendar: CalendarService,
+    rows: list[Task],
+    tasks: list[ParsedTask],
+    events: list[CalendarEvent],
+    today: date,
+    settings_row: AppSettings,
+) -> None:
+    """Validate the proposed blocks in code, then write the survivors."""
+    proposals = [task.proposal for task in tasks if task.proposal is not None]
+    blocks = schedule_blocks(
+        proposals, events, today, settings_row.workday_start, settings_row.workday_end
+    )
+    for block in blocks:
+        row = rows[block.task_index]
+        try:
+            row.gcal_event_id = calendar.create_block(row.title, block.start, block.minutes)
+        except CalendarUnavailable as error:
+            logger.warning("could not write block for task %s: %s", row.title, error)
+            continue
+        row.block_start = block.start
+        row.block_minutes = block.minutes
 
 
 def submit_evening(
