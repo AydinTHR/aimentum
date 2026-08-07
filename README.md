@@ -18,7 +18,19 @@ drives what the agent says and pushes.
 
 ## Status
 
-Phase 3: the agent brain. What exists today:
+Phase 4: push and scheduling, the product's priority zero. What exists today:
+
+- Web push over VAPID with subscribe, unsubscribe, and a send-test endpoint
+  the Settings screen calls to verify a device
+- Every send attempt written to `push_log` with its outcome, and dead
+  subscriptions pruned automatically when a gateway reports 404 or 410
+- `POST /tick` for the four scheduled jobs, authenticated by its own secret
+  header, claiming each job in `job_runs` before returning 202 and doing the
+  work in a background task
+- The nudge job checks for an existing plan before sending, and the evening
+  push carries the live pace line in the notification itself
+
+From Phase 3, the agent brain:
 
 - Morning planning: free text (or a voice transcript) goes in, Claude parses
   it into ordered tasks with goal links and a one-line priority rationale,
@@ -50,8 +62,41 @@ From Phase 2:
 - React + Vite + Tailwind frontend rendering a placeholder shell
 - CI runs the backend suite against a real Postgres service
 
-Coming next, in order: push and scheduling, Google Calendar integration, the
-installable PWA, and deployment.
+Coming next, in order: Google Calendar integration, the installable PWA, and
+deployment.
+
+## Notification reliability
+
+Notifications are the whole product: a push that arrives late or dies quietly
+is the app not existing that day. Web push has no delivery receipts, so there
+is no acknowledgement to check. Reliability is proven two ways instead, and
+the honest limitation is that neither is a receipt from the device:
+
+- Every send attempt is written to `push_log` with the gateway's status, and
+  the log row outlives its subscription so pruning never erases the evidence
+- A 48-hour soak against a real phone before deployment is called done, with
+  every scheduled push checked off against `push_log`
+
+Scheduling lives outside the process for the same reason. The backend sleeps
+on Render's free tier, so an in-process scheduler would sleep through its own
+alarms; cron-job.org calls `/tick` instead, with warmup requests a few minutes
+ahead to absorb cold starts.
+
+### Generating VAPID keys
+
+One command, run once. Paste the output into `backend/.env`, and give the
+frontend the same public key as `VITE_VAPID_PUBLIC_KEY`.
+
+```bash
+cd backend && uv run python -c "
+from py_vapid import Vapid01
+from py_vapid.utils import b64urlencode
+from cryptography.hazmat.primitives import serialization
+v = Vapid01(); v.generate_keys()
+print('VAPID_PUBLIC_KEY=' + b64urlencode(v.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)))
+print('VAPID_PRIVATE_KEY=' + b64urlencode(v.private_key.private_numbers().private_value.to_bytes(32, 'big')))
+"
+```
 
 ## Architecture
 
@@ -146,6 +191,23 @@ curl -s -X POST "$API/checkin/evening" -H "$AUTH" -H "$JSON" \
 
 # Weekly retros.
 curl -s "$API/retros/latest" -H "$AUTH"
+
+# Register a device for push, then verify it with a test notification.
+curl -s -X POST "$API/push/subscribe" -H "$AUTH" -H "$JSON" \
+  -d '{"endpoint": "https://fcm.googleapis.com/fcm/send/...",
+       "keys": {"p256dh": "...", "auth": "..."}, "user_agent": "iPhone Safari"}'
+curl -s -X POST "$API/push/test" -H "$AUTH"
+```
+
+The scheduler calls `/tick` with its own secret, never the bearer token.
+Calling it twice for the same job and day sends once: the second call is
+turned away by the `job_runs` claim.
+
+```bash
+curl -s -X POST "$API/tick?job=morning" -H "X-Tick-Secret: $TICK_SECRET"
+# {"job":"morning","date":"2026-08-07","status":"scheduled"}
+curl -s -X POST "$API/tick?job=morning" -H "X-Tick-Secret: $TICK_SECRET"
+# {"job":"morning","date":"2026-08-07","status":"already_ran"}
 ```
 
 ## Development workflow
