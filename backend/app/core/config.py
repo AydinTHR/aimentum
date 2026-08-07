@@ -26,5 +26,11 @@ class Settings(BaseSettings):
     google_application_credentials_json: str = ""
     stt_language_codes: str = "en-US"
 
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_refresh_token: str = ""
+    gcal_calendar_id: str = ""
+    gcal_calendar_name: str = "Aimentum"
+
 
 settings = Settings()
