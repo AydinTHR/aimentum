@@ -1,5 +1,6 @@
 import os
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from alembic import command
@@ -10,13 +11,15 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.db import Base, get_db
+from app.db import Base, get_db, get_session_factory
 from app.main import app
 from app.services.llm import get_llm
+from app.services.push import FakePushTransport, get_push_transport
 from app.services.stt import FakeSpeechToText, get_stt
 from tests.agent_fakes import FakeLlm
 
 TEST_TOKEN = "test-token"
+TEST_TICK_SECRET = "test-tick-secret"
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # A dedicated database so tests can never touch development data. The schema
@@ -55,8 +58,9 @@ def engine() -> Iterator[Engine]:
 
 
 @pytest.fixture(autouse=True)
-def _app_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def _secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "app_token", TEST_TOKEN)
+    monkeypatch.setattr(settings, "tick_secret", TEST_TICK_SECRET)
 
 
 @pytest.fixture
@@ -77,11 +81,26 @@ def client(db_session: Session) -> Iterator[TestClient]:
     def override() -> Iterator[Session]:
         yield db_session
 
+    @contextmanager
+    def override_factory() -> Iterator[Session]:
+        # Background tasks get the same session as the request, and must not
+        # close it: the fixture owns its lifetime.
+        yield db_session
+
     app.dependency_overrides[get_db] = override
+    app.dependency_overrides[get_session_factory] = lambda: override_factory
     with TestClient(app) as test_client:
         test_client.headers.update({"Authorization": f"Bearer {TEST_TOKEN}"})
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def fake_push() -> Iterator[FakePushTransport]:
+    fake = FakePushTransport()
+    app.dependency_overrides[get_push_transport] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_push_transport, None)
 
 
 @pytest.fixture

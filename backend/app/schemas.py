@@ -178,3 +178,39 @@ class RetroOut(BaseModel):
     id: int
     week_start: date
     body: str
+
+
+class PushKeys(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=500)
+    auth: str = Field(min_length=1, max_length=500)
+
+
+class PushSubscriptionIn(BaseModel):
+    """The shape a browser PushSubscription serializes to."""
+
+    endpoint: str = Field(min_length=1, max_length=2000)
+    keys: PushKeys
+    user_agent: str | None = Field(default=None, max_length=500)
+
+
+class PushSubscriptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    endpoint: str
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2000)
+
+
+class PushTestOut(BaseModel):
+    sent: int
+    statuses: list[str]
+    pruned: int
+
+
+class TickOut(BaseModel):
+    job: str
+    date: date
+    status: str
