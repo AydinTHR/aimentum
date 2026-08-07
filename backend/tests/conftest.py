@@ -31,6 +31,27 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "db", "postgres"}
+
+
+def _guard_destructive(url_str: str) -> None:
+    """Refuse to drop the schema of a database that is not local.
+
+    The suite wipes and rebuilds its schema on every run. Development now
+    points at a hosted database, so a stray TEST_DATABASE_URL is the
+    difference between a test run and losing real data. Set
+    ALLOW_REMOTE_TEST_DB=1 to override, for a throwaway branch.
+    """
+    host = make_url(url_str).host or ""
+    if host in LOCAL_HOSTS or os.environ.get("ALLOW_REMOTE_TEST_DB") == "1":
+        return
+    raise RuntimeError(
+        f"refusing to run destructive tests against non-local host {host!r}. "
+        "Point TEST_DATABASE_URL at a local Postgres, or set "
+        "ALLOW_REMOTE_TEST_DB=1 if this really is a throwaway database."
+    )
+
+
 def _ensure_database(url_str: str) -> None:
     url = make_url(url_str)
     admin_engine = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
@@ -45,6 +66,7 @@ def _ensure_database(url_str: str) -> None:
 
 @pytest.fixture(scope="session")
 def engine() -> Iterator[Engine]:
+    _guard_destructive(TEST_DATABASE_URL)
     _ensure_database(TEST_DATABASE_URL)
     engine = create_engine(TEST_DATABASE_URL)
     with engine.begin() as conn:
