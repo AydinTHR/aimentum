@@ -18,7 +18,20 @@ drives what the agent says and pushes.
 
 ## Status
 
-Phase 4: push and scheduling, the product's priority zero. What exists today:
+Phase 5: Google Calendar. What exists today:
+
+- The agent reads the day's real events across your calendars and prioritizes
+  around them, and serves them to the Today screen at `GET /calendar/today`
+- Time blocks for the day's tasks are written into one dedicated Aimentum
+  calendar, so Google's own apps stay the calendar experience
+- Overlap checks and workday clamping happen in code, never in the prompt:
+  Claude proposes a time, the backend decides whether it survives
+- Re-planning deletes the blocks the previous plan created, via stored event
+  ids, so the calendar never accumulates stale entries
+- Losing Calendar degrades rather than breaks: planning still happens without
+  meetings, and the rationale says the calendar was unreachable
+
+From Phase 4, push and scheduling (the product's priority zero):
 
 - Web push over VAPID with subscribe, unsubscribe, and a send-test endpoint
   the Settings screen calls to verify a device
@@ -62,8 +75,7 @@ From Phase 2:
 - React + Vite + Tailwind frontend rendering a placeholder shell
 - CI runs the backend suite against a real Postgres service
 
-Coming next, in order: Google Calendar integration, the installable PWA, and
-deployment.
+Coming next, in order: the installable PWA, and deployment.
 
 ## Notification reliability
 
@@ -81,6 +93,43 @@ Scheduling lives outside the process for the same reason. The backend sleeps
 on Render's free tier, so an in-process scheduler would sleep through its own
 alarms; cron-job.org calls `/tick` instead, with warmup requests a few minutes
 ahead to absorb cold starts.
+
+## Connecting Google Calendar
+
+The only OAuth in this project is the backend's own one-time connection to
+the owner's Google account. There is no user-facing sign-in.
+
+Before running anything: create an OAuth client of type **Desktop** in your
+Google Cloud project, enable the Calendar API, and set the consent screen to
+**In production**. Leaving it in Testing mode expires refresh tokens after
+seven days, so calendar access would die every week without any visible
+cause. Put the client id and secret in `backend/.env`, then:
+
+```bash
+cd backend
+uv run python scripts/google_oauth.py           # browser flow, prints the refresh token
+uv run python scripts/google_calendar_setup.py  # creates the calendar, prints its id
+```
+
+Paste both values into `backend/.env`. The setup script finds or creates a
+calendar named Aimentum; the agent writes only there and never touches your
+own calendars except to read them.
+
+### Real-account smoke test
+
+With the values in place, run the backend and check the round trip:
+
+```bash
+curl -s "$API/calendar/today" -H "$AUTH"        # should list today's real events
+```
+
+Then submit a morning check-in with time blocking on and confirm in Google
+Calendar that the blocks appear in the Aimentum calendar, sit inside your
+workday window, and avoid your existing meetings. Submit a second check-in
+for the same day and confirm the first set of blocks disappears rather than
+piling up. To check the degradation path, unset `GOOGLE_OAUTH_REFRESH_TOKEN`
+and submit again: the plan should still be created, with no blocks and a
+rationale that says the calendar was unreachable.
 
 ### Generating VAPID keys
 
@@ -211,6 +260,9 @@ curl -s -X POST "$API/checkin/evening" -H "$AUTH" -H "$JSON" \
 
 # Weekly retros.
 curl -s "$API/retros/latest" -H "$AUTH"
+
+# Today's agenda. Reports availability rather than failing when Calendar is down.
+curl -s "$API/calendar/today" -H "$AUTH"
 
 # Register a device for push, then verify it with a test notification.
 curl -s -X POST "$API/push/subscribe" -H "$AUTH" -H "$JSON" \
