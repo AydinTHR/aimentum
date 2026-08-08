@@ -14,11 +14,19 @@ agent would silently lose calendar access every week.
 """
 
 import sys
+from pathlib import Path
 
-from google_auth_oauthlib.flow import InstalledAppFlow
+# Run as a file path, Python puts scripts/ on the import path rather than the
+# project root, so `app` resolves only through the editable install. Add the
+# root explicitly: a setup script should work on a fresh clone, before anyone
+# has installed anything.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.config import settings
-from app.services.calendar import SCOPES
+from envfile import set_key  # noqa: E402
+from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: E402
+
+from app.core.config import settings  # noqa: E402
+from app.services.calendar import SCOPES  # noqa: E402
 
 
 def main() -> int:
@@ -57,9 +65,9 @@ def main() -> int:
         )
         return 1
 
-    print("\nPaste this into backend/.env:\n")
-    print(f"GOOGLE_OAUTH_REFRESH_TOKEN={credentials.refresh_token}")
-    print("\nThen run scripts/google_calendar_setup.py to create the calendar.")
+    path = set_key("GOOGLE_OAUTH_REFRESH_TOKEN", credentials.refresh_token)
+    print(f"\nRefresh token written to {path} (not printed: it grants calendar access).")
+    print("Next: uv run python scripts/google_calendar_setup.py")
     return 0
 
 

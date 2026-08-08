@@ -10,9 +10,16 @@ re-plan without touching anything a human put there.
 """
 
 import sys
+from pathlib import Path
 
-from app.core.config import settings
-from app.services.calendar import CalendarUnavailable, GoogleCalendarService
+# See the note in google_oauth.py: a setup script must not depend on the
+# project already being installed.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from envfile import set_key  # noqa: E402
+
+from app.core.config import settings  # noqa: E402
+from app.services.calendar import CalendarUnavailable, GoogleCalendarService  # noqa: E402
 
 
 def main() -> int:
@@ -22,9 +29,9 @@ def main() -> int:
         print(f"Calendar setup failed: {error}", file=sys.stderr)
         return 1
 
-    print(f"\nCalendar '{settings.gcal_calendar_name}' is ready.")
-    print("\nPaste this into backend/.env:\n")
-    print(f"GCAL_CALENDAR_ID={calendar_id}")
+    path = set_key("GCAL_CALENDAR_ID", calendar_id)
+    print(f"\nCalendar '{settings.gcal_calendar_name}' is ready: {calendar_id}")
+    print(f"Written to {path}.")
     return 0
 
 
