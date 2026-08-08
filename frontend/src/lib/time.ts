@@ -1,36 +1,50 @@
-/** Display helpers. The API already serializes datetimes in the owner's
- * timezone (America/Toronto), so rendering uses the device clock, which is
- * the same place. */
+/** Display helpers.
+ *
+ * Everything renders in the owner's timezone, never the device's. The backend
+ * goes out of its way to serialize datetimes in America/Toronto, and a device
+ * set elsewhere (travelling, or a machine left on UTC) would otherwise show a
+ * block at an hour the plan never meant and the calendar does not agree with.
+ */
+const USER_TIMEZONE = "America/Toronto";
+
+const TIME_FORMAT: Intl.DateTimeFormatOptions = {
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: USER_TIMEZONE,
+};
 
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString("en-US", TIME_FORMAT);
 }
 
 export function formatTimeRange(startIso: string, minutes: number): string {
   const start = new Date(startIso);
   const end = new Date(start.getTime() + minutes * 60_000);
-  return `${formatTime(startIso)} to ${end.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  })}`;
+  return `${formatTime(startIso)} to ${end.toLocaleTimeString("en-US", TIME_FORMAT)}`;
 }
 
-/** "Friday, August 8" from a date-only string, parsed as local so the day
- * never shifts across midnight UTC. */
-export function formatDateLong(dateStr: string): string {
+/** Date-only strings have no timezone, so they are read and rendered as UTC.
+ * Anything else lets a device offset shift "today" onto the wrong day. */
+function fromDateOnly(dateStr: string): Date {
   const [year, month, day] = dateStr.split("-").map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString([], {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+/** "Friday, August 8" */
+export function formatDateLong(dateStr: string): string {
+  return fromDateOnly(dateStr).toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
+    timeZone: "UTC",
   });
 }
 
 export function formatDateShort(dateStr: string): string {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString([], {
+  return fromDateOnly(dateStr).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
 }
 
