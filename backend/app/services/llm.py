@@ -12,12 +12,16 @@ from pathlib import Path
 from string import Template
 from typing import Annotated, Protocol
 
-from anthropic import Anthropic
+from anthropic import Anthropic, AnthropicError
 from fastapi import Depends
 
 from app.core.config import settings
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+
+
+class LlmUnavailable(Exception):
+    """The agent cannot think right now: no key, or the API refused."""
 
 
 class LlmClient(Protocol):
@@ -27,18 +31,36 @@ class LlmClient(Protocol):
 
 
 class AnthropicClient:
+    """Built lazily, like the calendar client.
+
+    An unset key must not blow up at import time, and it must not surface as
+    a 500 with a stack trace either: planning is the first thing the owner
+    touches, so the reason has to reach the screen.
+    """
+
     def __init__(self) -> None:
-        self._client = Anthropic(
-            api_key=settings.anthropic_api_key,
-            max_retries=settings.anthropic_max_retries,
-        )
+        self._client: Anthropic | None = None
+
+    def _get_client(self) -> Anthropic:
+        if self._client is None:
+            if not settings.anthropic_api_key:
+                raise LlmUnavailable("ANTHROPIC_API_KEY is not set")
+            self._client = Anthropic(
+                api_key=settings.anthropic_api_key,
+                max_retries=settings.anthropic_max_retries,
+            )
+        return self._client
 
     def _complete(self, model: str, prompt: str) -> str:
-        response = self._client.messages.create(
-            model=model,
-            max_tokens=settings.anthropic_max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        client = self._get_client()
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=settings.anthropic_max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except AnthropicError as error:
+            raise LlmUnavailable(str(error)) from error
         return "".join(block.text for block in response.content if block.type == "text")
 
     def complete_daily(self, prompt: str) -> str:

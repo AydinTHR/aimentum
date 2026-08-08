@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.auth import BearerAuthMiddleware
 from app.core.config import settings
@@ -16,6 +19,7 @@ from app.routers import (
     tick,
     today,
 )
+from app.services.llm import LlmUnavailable
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(BearerAuthMiddleware)
@@ -28,6 +32,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type"],
 )
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(LlmUnavailable)
+def _llm_unavailable(request: Request, exc: LlmUnavailable) -> JSONResponse:
+    """Answer with a reason instead of a stack trace.
+
+    Planning is the first thing the owner touches, so "the agent could not
+    be reached" has to arrive as readable copy on the screen rather than as
+    an opaque 500.
+    """
+    logger.warning("llm unavailable on %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "The agent could not be reached right now. Try again in a moment."},
+    )
+
+
 app.include_router(health.router)
 app.include_router(goals.router)
 app.include_router(progress.router)
