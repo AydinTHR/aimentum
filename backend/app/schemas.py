@@ -223,6 +223,10 @@ class PushTestOut(BaseModel):
     pruned: int
 
 
+class VapidKeyOut(BaseModel):
+    public_key: str
+
+
 class TickOut(BaseModel):
     job: str
     date: date

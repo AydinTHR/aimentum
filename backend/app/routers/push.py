@@ -1,12 +1,30 @@
 from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.db import DbSession
 from app.models import PushSubscription
-from app.schemas import PushSubscriptionIn, PushSubscriptionOut, PushTestOut, PushUnsubscribeIn
+from app.schemas import (
+    PushSubscriptionIn,
+    PushSubscriptionOut,
+    PushTestOut,
+    PushUnsubscribeIn,
+    VapidKeyOut,
+)
 from app.services.push import Notification, PushDep, send_to_all
 
 router = APIRouter(tags=["push"])
+
+
+@router.get("/push/public-key")
+def public_key() -> VapidKeyOut:
+    """The VAPID application server key the browser subscribes with.
+
+    Served by the API instead of baked into the frontend build so the key
+    pair lives in exactly one place, the backend env, and rotating it does
+    not require a frontend redeploy.
+    """
+    return VapidKeyOut(public_key=settings.vapid_public_key)
 
 
 @router.post("/push/subscribe", status_code=201)

@@ -1,9 +1,11 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import PushLog, PushSubscription
 from app.services.push import FakePushTransport, SendOutcome
 
@@ -144,3 +146,13 @@ class TestSendAndLogging:
     def test_test_push_with_no_subscriptions_is_harmless(self, client: TestClient) -> None:
         payload = client.post("/push/test").json()
         assert payload == {"sent": 0, "statuses": [], "pruned": 0}
+
+
+class TestVapidKey:
+    def test_public_key_is_served(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "vapid_public_key", "BTestApplicationServerKey")
+        response = client.get("/push/public-key")
+        assert response.status_code == 200
+        assert response.json() == {"public_key": "BTestApplicationServerKey"}

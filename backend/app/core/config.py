@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     log_level: str = "info"
     app_token: str = ""
     database_url: str = "postgresql+psycopg://aimentum:aimentum@localhost:5432/aimentum"
+    cors_origins: str = "http://localhost:5173"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     tick_secret: str = ""
 

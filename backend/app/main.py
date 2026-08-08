@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.auth import BearerAuthMiddleware
 from app.core.config import settings
@@ -18,6 +19,15 @@ from app.routers import (
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(BearerAuthMiddleware)
+# Added after the auth middleware on purpose: Starlette wraps in reverse
+# order, so CORS ends up outermost and preflight OPTIONS requests (which
+# carry no Authorization header) are answered before auth can reject them.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_methods=["*"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 app.include_router(health.router)
 app.include_router(goals.router)
 app.include_router(progress.router)
