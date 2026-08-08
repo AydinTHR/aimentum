@@ -1,11 +1,59 @@
+import { useState, useSyncExternalStore } from "react";
+
+import { tokenStore } from "./api/client";
+import { BookIcon, GearIcon, SunIcon, TargetIcon } from "./components/icons";
+import { InstallHint } from "./components/InstallHint";
+import { GoalsScreen } from "./screens/Goals";
+import { RetrosScreen } from "./screens/Retros";
+import { SettingsScreen } from "./screens/Settings";
+import { TodayScreen } from "./screens/Today";
+import { TokenGate } from "./TokenGate";
+
+const TABS = [
+  { id: "today", label: "Today", Icon: SunIcon },
+  { id: "goals", label: "Goals", Icon: TargetIcon },
+  { id: "retros", label: "Retros", Icon: BookIcon },
+  { id: "settings", label: "Settings", Icon: GearIcon },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
 function App() {
+  const token = useSyncExternalStore(tokenStore.subscribe, tokenStore.get);
+  const [tab, setTab] = useState<TabId>("today");
+
+  if (!token) return <TokenGate />;
+
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center bg-zinc-950 text-zinc-100">
-      <h1 className="text-4xl font-semibold tracking-tight">Aimentum</h1>
-      <p className="mt-3 max-w-xs text-center text-sm text-zinc-400">
-        Your accountability agent. It reaches out to you, not the other way around.
-      </p>
-    </main>
+    <div className="mx-auto flex min-h-svh w-full max-w-md flex-col">
+      <main className="flex-1 px-4 pb-28 pt-6">
+        <InstallHint />
+        {tab === "today" && <TodayScreen />}
+        {tab === "goals" && <GoalsScreen />}
+        {tab === "retros" && <RetrosScreen />}
+        {tab === "settings" && <SettingsScreen />}
+      </main>
+      <nav
+        aria-label="Main"
+        className="fixed inset-x-0 bottom-0 border-t border-zinc-800 bg-zinc-950/85 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      >
+        <div className="mx-auto grid max-w-md grid-cols-4">
+          {TABS.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              aria-current={tab === id ? "page" : undefined}
+              className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors ${
+                tab === id ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Icon className="size-5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </nav>
+    </div>
   );
 }
 

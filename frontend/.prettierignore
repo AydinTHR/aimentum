@@ -1,0 +1,5 @@
+# Build output. CI happens to build after checking formatting, so this never
+# failed there, but a local `npm run build` before `format:check` would.
+dist/
+dev-dist/
+coverage/

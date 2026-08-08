@@ -18,7 +18,22 @@ drives what the agent says and pushes.
 
 ## Status
 
-Phase 5: Google Calendar. What exists today:
+Phase 6: the installable PWA. What exists today:
+
+- A phone-first app behind a single token gate: Today, Goals, Retros, Settings
+- Morning check-in by voice or text. Speech becomes editable text first, so a
+  plan is always made from words you confirmed, never from raw transcription
+- One agenda merging your real calendar events with the plan's own time blocks
+- A progress card that leads with pace rather than totals, and task toggles
+  that apply instantly and revert if the server disagrees
+- Notifications enabled per device from Settings, with a test button that
+  reports what each push gateway actually said
+- A service worker handling push and notification clicks, and an install hint
+  on iOS, where push only works once the app is on the home screen
+- The agent fails out loud but politely: a missing key or an Anthropic outage
+  becomes readable copy on the screen instead of a raw 500
+
+From Phase 5, Google Calendar:
 
 - The agent reads the day's real events across your calendars and prioritizes
   around them, and serves them to the Today screen at `GET /calendar/today`
@@ -72,10 +87,9 @@ From Phase 2:
 - Auto-logged progress: evening application counts and completed linked tasks
   move the bars without bookkeeping
 - `/today`, `/progress/summary`, and settings endpoints for the PWA to come
-- React + Vite + Tailwind frontend rendering a placeholder shell
 - CI runs the backend suite against a real Postgres service
 
-Coming next, in order: the installable PWA, and deployment.
+Coming next: deployment.
 
 ## Notification reliability
 
@@ -133,8 +147,10 @@ rationale that says the calendar was unreachable.
 
 ### Generating VAPID keys
 
-One command, run once. Paste the output into `backend/.env`, and give the
-frontend the same public key as `VITE_VAPID_PUBLIC_KEY`.
+One command, run once. Paste both values into `backend/.env`. The frontend
+fetches the public key from `GET /push/public-key` rather than baking it into
+the build, so the key pair lives in one place and rotating it needs no
+frontend redeploy.
 
 ```bash
 cd backend && uv run python -c "
@@ -189,6 +205,21 @@ cd frontend
 npm install
 npm run dev                                  # http://localhost:5173
 npm run test
+```
+
+The frontend talks to `http://localhost:8000` by default; set `VITE_API_URL`
+to point somewhere else. The backend must allow the frontend's origin through
+`CORS_ORIGINS`, which already lists the Vite dev server.
+
+Sign in with the value of `APP_TOKEN`. The service worker runs in development
+too, so push can be tested without building first.
+
+### Regenerating the app icons
+
+Every icon comes from one mark definition, so the sizes cannot drift apart:
+
+```bash
+cd frontend && node scripts/generate-icons.mjs
 ```
 
 ### Running the tests
