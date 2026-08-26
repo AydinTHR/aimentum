@@ -24,7 +24,13 @@ class Base(DeclarativeBase):
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    return create_engine(settings.database_url)
+    # pool_pre_ping because both halves of the hosting go to sleep: Neon
+    # suspends an idle compute after a few minutes and Render spins the
+    # service down after longer, which leaves a window where the pool still
+    # holds connections the database has already closed. Without the ping the
+    # first request in that window dies on a closed socket, and /health
+    # touches no database so nothing upstream would notice.
+    return create_engine(settings.database_url, pool_pre_ping=True)
 
 
 @lru_cache(maxsize=1)
