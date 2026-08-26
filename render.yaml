@@ -1,0 +1,82 @@
+# The API as Render runs it. Apply once from the dashboard; after that the
+# secrets live in Render and everything else lives here, in review.
+#
+# There is no preDeployCommand: it is a paid plan feature, which is why
+# migrations run from the image's entrypoint instead.
+services:
+  - type: web
+    name: aimentum-api
+    runtime: docker
+    plan: free
+    # Toronto's nearest region. Keep the Neon project on the same coast so
+    # the database round trip is not crossing the continent twice.
+    region: ohio
+    branch: main
+    # Relative to the repository root. Do not add rootDir as well: it would
+    # be prefixed onto these and the build would look for
+    # backend/backend/Dockerfile.
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # /health is public and touches no database, so it answers as soon as
+    # uvicorn binds and a sleeping Neon cannot trigger a restart loop. The
+    # trade-off is that a green check does not prove the API can serve.
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # A frontend-only commit must not restart the API. A restart during a
+    # /tick background task is the one window where a claimed job is lost.
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+    envVars:
+      # Named so that EXPOSE, the entrypoint's default, and Render all agree
+      # on one number instead of each assuming.
+      - key: PORT
+        value: "8000"
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: ANTHROPIC_MODEL_DAILY
+        value: claude-haiku-4-5-20251001
+      - key: ANTHROPIC_MODEL_RETRO
+        value: claude-sonnet-4-6
+      - key: ANTHROPIC_MAX_TOKENS
+        value: "1024"
+      - key: ANTHROPIC_MAX_RETRIES
+        value: "2"
+      - key: STT_LANGUAGE_CODES
+        value: en-US
+      - key: VAPID_SUBJECT
+        value: mailto:aidinthr82@gmail.com
+      # Set in the dashboard while the frontend origin is still moving. Once
+      # the domain is settled, promote it to a literal here so a CORS change
+      # becomes a reviewable diff. Exact origin: scheme and host, no trailing
+      # slash, no path.
+      - key: CORS_ORIGINS
+        sync: false
+      # Secrets. sync: false keeps every value in Render and out of git.
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_TOKEN
+        sync: false
+      - key: TICK_SECRET
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_CLOUD_PROJECT
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
+        sync: false
+      - key: GCAL_CALENDAR_ID
+        sync: false
