@@ -102,6 +102,9 @@ describe("App", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // jsdom keeps whatever path the last test left behind, and the opening
+    // tab is now read from it.
+    window.history.replaceState(null, "", "/");
   });
 
   it("shows the token gate when there is no token", () => {
@@ -217,6 +220,34 @@ describe("App", () => {
 
       expect(await screen.findByRole("heading", { name: "Retros" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
+    });
+
+    it("opens on the screen the notification pointed at", async () => {
+      // The Sunday retro push carries url: "/retros" and the service worker
+      // navigates to it. Opening on Today would land a tap away from the
+      // thing the notification announced.
+      window.history.replaceState(null, "", "/retros");
+      render(<App />);
+
+      expect(await screen.findByRole("heading", { name: "Retros" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
+    });
+
+    it("falls back to Today for a path it does not recognise", async () => {
+      window.history.replaceState(null, "", "/somewhere-else");
+      render(<App />);
+
+      expect(await screen.findByRole("heading", { name: "Today" })).toBeInTheDocument();
+    });
+
+    it("keeps the address in step with the screen", async () => {
+      render(<App />);
+      await screen.findByRole("heading", { name: "Today" });
+
+      await userEvent.click(screen.getByRole("button", { name: "Goals" }));
+
+      await screen.findByRole("heading", { name: "Goals" });
+      expect(window.location.pathname).toBe("/goals");
     });
 
     it("asks for a morning check-in when there is no plan yet", async () => {

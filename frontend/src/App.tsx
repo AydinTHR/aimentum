@@ -18,9 +18,22 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+/** The tab the app opens on, taken from the path.
+ *
+ * Notifications carry a url: /today for the daily jobs, /retros for the
+ * Sunday one, and the service worker navigates to it. Without this the app
+ * always opened on Today, so tapping the retro notification landed a tap
+ * away from the thing it was announcing. Anything unrecognised falls back to
+ * Today rather than showing nothing.
+ */
+function tabFromPath(pathname: string): TabId {
+  const candidate = pathname.replace(/^\/+|\/+$/g, "");
+  return TABS.find((entry) => entry.id === candidate)?.id ?? "today";
+}
+
 function App() {
   const token = useSyncExternalStore(tokenStore.subscribe, tokenStore.get);
-  const [tab, setTab] = useState<TabId>("today");
+  const [tab, setTab] = useState<TabId>(() => tabFromPath(window.location.pathname));
 
   if (!token) return <TokenGate />;
 
@@ -41,7 +54,12 @@ function App() {
           {TABS.map(({ id, label, Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
+              onClick={() => {
+                setTab(id);
+                // Keep the address honest, so a reload or a notification
+                // arriving at an open window resumes where the owner is.
+                window.history.replaceState(null, "", `/${id}`);
+              }}
               aria-current={tab === id ? "page" : undefined}
               className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors ${
                 tab === id ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300"
