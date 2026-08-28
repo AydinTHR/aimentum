@@ -7,7 +7,7 @@
 
 # Pinned to the uv that produced uv.lock, and named so Dependabot's docker
 # ecosystem tracks it like any other dependency.
-FROM ghcr.io/astral-sh/uv:0.11.17 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.5 AS uv
 
 
 FROM python:3.12-slim-bookworm AS builder
