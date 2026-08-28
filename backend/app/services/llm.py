@@ -48,6 +48,10 @@ class AnthropicClient:
             self._client = Anthropic(
                 api_key=settings.anthropic_api_key,
                 max_retries=settings.anthropic_max_retries,
+                # None keeps the SDK on its own default, the real Anthropic
+                # API. A set value routes the identical request through a
+                # gateway that speaks the same Messages API.
+                base_url=settings.anthropic_base_url or None,
             )
         return self._client
 

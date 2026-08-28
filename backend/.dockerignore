@@ -1,0 +1,25 @@
+# Deny everything, then allow exactly what the image needs.
+#
+# An allowlist rather than a denylist on purpose: backend/.env holds a live
+# app token, database URL, VAPID private key and Google refresh token, and
+# backend/.venv is 356 MB. A denylist is one forgotten pattern away from
+# baking both into a layer, and a layer that has held a secret keeps it even
+# if a later layer deletes the file.
+#
+# "*" matches top level entries only, since Docker patterns do not cross "/",
+# so re-including a directory below re-includes what is inside it.
+*
+
+!alembic
+!alembic.ini
+!app
+!docker-entrypoint.sh
+!pyproject.toml
+!README.md
+!uv.lock
+
+# Anything the allowed directories might still be carrying.
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+**/.env

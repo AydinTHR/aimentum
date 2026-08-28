@@ -61,16 +61,94 @@ jobs:
       - run: npm run test
       - run: npm run build
 
+  docker:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aimentum_smoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t aimentum-api:ci ./backend
+
+      - name: It runs unprivileged and carries no secrets
+        run: |
+          test "$(docker run --rm --entrypoint id aimentum-api:ci -u)" = "10001"
+          docker run --rm --entrypoint sh aimentum-api:ci -c \
+            'if find / -xdev -name ".env" 2>/dev/null | grep -q .; then
+               echo "an .env file reached the image"; exit 1; fi'
+
+      # --network host so the container reaches the Postgres service on
+      # 127.0.0.1 and publishes its own port straight to the runner.
+      - name: It migrates on boot and serves /health
+        run: |
+          docker run -d --name api --network host \
+            -e PORT=8000 \
+            -e DATABASE_URL='postgresql+psycopg://postgres:postgres@127.0.0.1:5432/aimentum_smoke' \
+            -e APP_TOKEN=ci-token \
+            -e TICK_SECRET=ci-tick-secret \
+            aimentum-api:ci
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "the container never answered /health"
+          docker logs api
+          exit 1
+
+      - name: The migrations really ran
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d aimentum_smoke \
+            -tAc "select version_num from alembic_version" | grep -q .
+
+      - name: Auth is on
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/settings)
+          test "${code}" = "401"
+
+      # The regression test for the exec in the entrypoint. Without it the
+      # shell stays PID 1, swallows SIGTERM, and this exits 137 after the
+      # full timeout, taking any in-flight /tick push with it.
+      - name: SIGTERM stops it gracefully
+        run: |
+          start=$(date +%s)
+          docker stop -t 30 api
+          elapsed=$(( $(date +%s) - start ))
+          code=$(docker inspect -f '{{.State.ExitCode}}' api)
+          echo "exit code ${code} after ${elapsed}s"
+          test "${code}" = "0"
+          test "${elapsed}" -lt 15
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
+
   # Stable required check. Branch protection requires "CI", which stays valid
   # no matter how the jobs above evolve.
   CI:
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, docker]
     if: always()
     steps:
       - name: Aggregate results
         run: |
-          if [ "${{ needs.backend.result }}" != "success" ] || [ "${{ needs.frontend.result }}" != "success" ]; then
+          if [ "${{ needs.backend.result }}" != "success" ] \
+            || [ "${{ needs.frontend.result }}" != "success" ] \
+            || [ "${{ needs.docker.result }}" != "success" ]; then
             echo "a required job did not succeed"
             exit 1
           fi

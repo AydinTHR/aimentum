@@ -18,7 +18,22 @@ drives what the agent says and pushes.
 
 ## Status
 
-Phase 6: the installable PWA. What exists today:
+Phase 7: deployment. What exists today:
+
+- The API ships as a Docker image that migrates on boot and refuses to serve
+  against a schema it could not bring up to date
+- Shutdown is graceful on purpose, not by luck: uvicorn runs as PID 1 so
+  Render's SIGTERM reaches it and an in-flight scheduled push finishes sending
+- CI builds that image on every pull request and boots it against a real
+  Postgres, checking the things a green build hides: unprivileged process, no
+  stray `.env`, auth still on, and a clean exit on SIGTERM
+- `render.yaml` and `vercel.json` hold every non-secret setting, and the Vercel
+  build refuses to run without the API URL rather than silently shipping one
+  that points at localhost
+- A runbook below covering the order the four services go up in, the cron
+  schedule, rollback, VAPID rotation, and the soak
+
+From Phase 6, the installable PWA:
 
 - A phone-first app behind a single token gate: Today, Goals, Retros, Settings
 - Morning check-in by voice or text. Speech becomes editable text first, so a
@@ -89,7 +104,7 @@ From Phase 2:
 - `/today`, `/progress/summary`, and settings endpoints for the PWA to come
 - CI runs the backend suite against a real Postgres service
 
-Coming next: deployment.
+Coming next: the 48-hour notification soak that ADR-0003 says gates done.
 
 ## Notification reliability
 
@@ -312,6 +327,191 @@ curl -s -X POST "$API/tick?job=morning" -H "X-Tick-Secret: $TICK_SECRET"
 curl -s -X POST "$API/tick?job=morning" -H "X-Tick-Secret: $TICK_SECRET"
 # {"job":"morning","date":"2026-08-07","status":"already_ran"}
 ```
+
+## Deployment
+
+Four services, all on free tiers: the API on Render as a Docker image, the PWA
+on Vercel, Postgres on Neon, and the schedule on cron-job.org. The reasoning
+is in [ADR-0001](./docs/adr/0001-overall-architecture.md) and
+[ADR-0002](./docs/adr/0002-external-cron-over-in-process-scheduler.md).
+
+The order matters and is not recoverable by guessing: the API needs the
+frontend's origin for CORS, and the frontend needs the API's URL baked in at
+build time. One of them is therefore configured twice.
+
+### 1. Neon
+
+Create a project and take the **direct** connection string, not the pooled
+one (the host without `-pooler`). This is a long-running process with its own
+SQLAlchemy pool, so PgBouncer adds nothing, and its transaction pooling breaks
+psycopg's prepared statements. Change the scheme to `postgresql+psycopg` and
+keep `?sslmode=require`.
+
+### 2. Render
+
+New Blueprint from this repository. [render.yaml](./render.yaml) declares the
+service; fill in every value marked `sync: false` in the dashboard, and set
+`CORS_ORIGINS` to a placeholder for now. Generate the two shared secrets
+locally:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # once for APP_TOKEN, once for TICK_SECRET
+```
+
+Decide here whether production reuses your existing VAPID pair or gets a new
+one, because changing it later strands every device (see Rotating VAPID keys
+below).
+
+Migrations run from the container entrypoint, since a pre-deploy command is a
+paid plan feature. The deploy log should show `Running upgrade` lines followed
+by the current revision.
+
+### 3. Verify the API before going further
+
+```bash
+API=https://<your-service>.onrender.com
+AUTH="Authorization: Bearer $APP_TOKEN"
+
+curl -s "$API/health"                          # {"status":"ok"}
+curl -s -o /dev/null -w '%{http_code}\n' "$API/settings"          # 401
+curl -s -o /dev/null -w '%{http_code}\n' "$API/settings" -H "$AUTH"  # 200
+curl -s "$API/push/public-key" -H "$AUTH"      # the VAPID public key
+```
+
+### 4. Vercel
+
+Import the repository with **Root Directory `frontend`** and Node 22, to match
+CI. [frontend/vercel.json](./frontend/vercel.json) carries everything else.
+
+Set `VITE_API_URL` to the Render URL, **with no trailing slash**, for
+Production, Preview and Development. Vite bakes it into the bundle at build
+time, so this is a build variable, not a runtime one: changing it later needs a
+redeploy, not a restart. The build refuses to run without it, because the
+fallback is `http://localhost:8000` and a browser on an HTTPS page reports that
+as "could not reach the server", which is indistinguishable from the backend
+being asleep.
+
+### 5. Back to Render for CORS
+
+Set `CORS_ORIGINS` to the final Vercel origin: scheme and host, no trailing
+slash, no path. Starlette compares origins by exact string, and because the
+CORS middleware sits outside the auth middleware, a mismatch blocks even the
+401s the token gate needs to read. Do this outside a scheduled window, since
+it restarts the service.
+
+```bash
+curl -si -X OPTIONS "$API/settings" \
+  -H "Origin: https://<your-app>.vercel.app" \
+  -H "Access-Control-Request-Method: GET" \
+  -H "Access-Control-Request-Headers: authorization" | grep -i access-control-allow-origin
+```
+
+Vercel preview deployments get their own origins and will be CORS-blocked
+unless you add them. That is expected.
+
+### 6. Verify the frontend
+
+```bash
+APP=https://<your-app>.vercel.app
+
+# The API URL was baked in, and localhost was not.
+asset=$(curl -s "$APP/" | grep -o '/assets/index-[^"]*\.js' | head -1)
+curl -s "$APP$asset" | grep -c 'localhost:8000'    # must be 0
+curl -s "$APP$asset" | grep -c 'onrender.com'      # must be at least 1
+
+# Notification targets resolve instead of 404ing.
+curl -s -o /dev/null -w '%{http_code}\n' "$APP/retros"   # 200
+
+# The worker is never served stale.
+curl -sI "$APP/sw.js" | grep -i cache-control
+```
+
+### 7. On the phone
+
+Install to the home screen first: iOS only delivers web push to an installed
+PWA. Then enter the token, enable notifications in Settings, and press the test
+button.
+
+Then run one **real** morning check-in and one **real** voice check-in. Claude
+and Google Speech-to-Text have only ever run here against fakes and a mocked
+client, so this is the first time that code meets the real APIs. The voice path
+in particular exercises the whole image at once: `ffmpeg` and `ffprobe` on
+PATH, a writable `/tmp` as an unprivileged user, and the credentials file that
+`stt.py` writes on the first transcription rather than at startup.
+
+### 8. cron-job.org
+
+Eight jobs: four ticks, and a `GET /health` warmup five minutes ahead of each
+to absorb Render's cold start. Create them in **America/Toronto**, not UTC, or
+every push shifts an hour at each DST change while the backend's own day
+boundary stays put. Enable retry on failure; the `job_runs` claim makes retries
+safe.
+
+| Job | Suggested time | Request |
+| --- | --- | --- |
+| morning | 07:00 | `POST /tick?job=morning` |
+| nudge | 10:30 | `POST /tick?job=nudge` |
+| evening | 20:30 | `POST /tick?job=evening` |
+| retro | Sunday 19:00 | `POST /tick?job=retro` |
+
+The times are yours to pick; the jobs are not. Every tick carries the tick
+secret and never the bearer token:
+
+```bash
+curl -X POST "$API/tick?job=morning" -H "X-Tick-Secret: $TICK_SECRET"
+```
+
+Verifying a tick by hand claims that job for the day, so the real one is then
+turned away with `already_ran`. Use a job whose window has passed, or delete
+the `job_runs` row afterwards.
+
+### Rolling back
+
+Migrations run on boot, so an image rolled back past a migration cannot find
+the revision the database is on and refuses to start: the rollback makes the
+outage worse. Migrations are additive, so an old image runs fine against a new
+schema. To go back past one, downgrade first, from your laptop, because Render
+free has no shell:
+
+```bash
+cd backend && DATABASE_URL='<production url>' uv run alembic downgrade <revision>
+```
+
+### Rotating VAPID keys
+
+The frontend reads the public key from `GET /push/public-key`, so rotating the
+pair needs no frontend redeploy. It does need every device to toggle
+notifications off and on again in Settings: an existing subscription is bound
+to the old application server key, and sends against it fail with a gateway
+status that is not 404 or 410, so it is never pruned and the failure repeats
+silently in `push_log`.
+
+### The 48-hour soak
+
+[ADR-0003](./docs/adr/0003-web-push-pwa-over-telegram.md) says deployment is
+not finished until two days of scheduled pushes have arrived on a real phone.
+Web push has no delivery receipts, so `push_log` proves a send was attempted
+and only the phone proves it landed. Both halves are required.
+
+```sql
+select job, date, ran_at from job_runs order by ran_at desc limit 20;
+select sent_at, job, status, endpoint from push_log order by sent_at desc limit 40;
+select job, status, count(*) from push_log group by 1, 2 order by 1;
+```
+
+Done means all of:
+
+- [ ] Every scheduled push over two days has a `push_log` row with a 2xx status
+- [ ] Every one of them was also seen on the device
+- [ ] The nudge correctly stayed silent on a day the plan already existed
+- [ ] One cold start timed after more than 20 minutes idle, and the app loaded
+- [ ] One voice check-in, one calendar-writing morning plan, one retro
+- [ ] No unexplained 5xx and no restart loops in the Render log
+
+Decide the production domain before the soak starts. Push subscriptions are
+keyed to the origin and the token lives in origin-scoped `localStorage`, so
+moving to a custom domain afterwards silently invalidates every subscription
+and the soak starts over.
 
 ## Development workflow
 

@@ -10,6 +10,19 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      # A Python minor bump changes the interpreter the image and uv.lock
+      # were resolved against. That is a deliberate decision, not a weekly
+      # chore.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
