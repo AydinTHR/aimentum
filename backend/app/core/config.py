@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     vapid_subject: str = "mailto:aidinthr82@gmail.com"
 
     anthropic_api_key: str = ""
+    # Empty means the real Anthropic API. Point it at a compatible gateway
+    # (OpenRouter serves the same Messages API) to change provider without
+    # touching the client, the prompts, or the parsing.
+    anthropic_base_url: str = ""
     anthropic_model_daily: str = "claude-haiku-4-5-20251001"
     anthropic_model_retro: str = "claude-sonnet-4-6"
     anthropic_max_tokens: int = 1024

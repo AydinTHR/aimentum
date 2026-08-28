@@ -39,6 +39,31 @@ class TestClientGuard:
         AnthropicClient()
 
 
+class TestProviderRouting:
+    """The same wrapper has to be able to talk to a compatible gateway.
+
+    Changing provider must not mean a second client, a second set of prompts,
+    or a second parsing path: only the base URL moves.
+    """
+
+    def test_an_unset_base_url_stays_on_the_anthropic_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+        monkeypatch.setattr(settings, "anthropic_base_url", "")
+
+        assert "anthropic.com" in str(AnthropicClient()._get_client().base_url)
+
+    def test_a_set_base_url_routes_through_the_gateway(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "anthropic_api_key", "test-key")
+        monkeypatch.setattr(settings, "anthropic_base_url", "https://example.test/api")
+
+        base_url = str(AnthropicClient()._get_client().base_url)
+        assert base_url.rstrip("/") == "https://example.test/api"
+
+
 class TestEndpointDegradation:
     def test_morning_checkin_answers_503_with_a_reason(self, client: TestClient) -> None:
         response = client.post("/checkin/morning", json={"raw_text": "plan my day"})

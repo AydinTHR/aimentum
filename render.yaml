@@ -37,10 +37,13 @@ services:
         value: production
       - key: LOG_LEVEL
         value: info
+      # Model ids belong to whichever provider ANTHROPIC_BASE_URL points at,
+      # so these two move together with it. OpenRouter namespaces and dots
+      # its ids; Anthropic does not.
       - key: ANTHROPIC_MODEL_DAILY
-        value: claude-haiku-4-5-20251001
+        value: anthropic/claude-haiku-4.5
       - key: ANTHROPIC_MODEL_RETRO
-        value: claude-sonnet-4-6
+        value: anthropic/claude-sonnet-4.6
       - key: ANTHROPIC_MAX_TOKENS
         value: "1024"
       - key: ANTHROPIC_MAX_RETRIES
@@ -53,6 +56,10 @@ services:
       # the domain is settled, promote it to a literal here so a CORS change
       # becomes a reviewable diff. Exact origin: scheme and host, no trailing
       # slash, no path.
+      # Empty talks to Anthropic directly. Set to https://openrouter.ai/api
+      # to serve the same Messages API through OpenRouter.
+      - key: ANTHROPIC_BASE_URL
+        value: https://openrouter.ai/api
       - key: CORS_ORIGINS
         sync: false
       # Secrets. sync: false keeps every value in Render and out of git.
